@@ -1,3 +1,4 @@
+// lib/parseExcel.ts
 import * as XLSX from "xlsx";
 import { Transaction } from "@/types/transaction";
 
@@ -24,11 +25,13 @@ const cleanDate = (value: any): string => {
   const str = String(value).trim();
   if (str.includes("/")) {
     const [part1, part2, part3] = str.split("/");
-    // Heuristic: If first part > 12, it's definitely Day. Assume DD/MM/YYYY.
-    // Excel usually exports dates consistently.
-    const day = part1.length === 4 ? part3 : part1;
-    const year = part1.length === 4 ? part1 : part3;
+    // Heuristic: If first part > 4 chars (likely year) or strictly 4 digits, assume YYYY/MM/DD
+    // Otherwise assume DD/MM/YYYY
+    const isYearFirst = part1.length === 4;
+    
+    const year = isYearFirst ? part1 : part3;
     const month = part2;
+    const day = isYearFirst ? part3 : part1;
     
     // Return YYYY-MM-DD
     return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
@@ -42,61 +45,42 @@ export async function parseExcel(file: File): Promise<Transaction[]> {
   const workbook = XLSX.read(buffer);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   
-  // Use "header: 1" to get raw arrays. This is safer than relying on specific column names like "Value Date"
-  // which might change slightly between bank exports.
-  const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
-
-  // Skip the header row (slice(1)) and map
-  const transactions: Transaction[] = [];
-
-  rows.slice(1).forEach((row, index) => {
-    // ADJUST INDICES: Look at your Excel file to be sure.
-    // Based on your previous code: Date is likely Col 0, Debit Col 1, Credit Col 2?
-    // If your headers are distinct, we can switch back to key-based, but cleaner logic is:
-    
-    // Attempt to find data by column index (safer for raw exports)
-    const rawDate = row[0];   // Col A
-    // Check if Debit is in Col B (1) or C (2)
-    // Your ledger had: Date | Debit | Credit
-    // Your bank had: Date | (Empty) | Debit | Credit ... varies.
-    
-    // Let's rely on the previous logic: if headers were working, use row keys?
-    // Actually, raw index is safer if you know the structure.
-    // Let's stick to the Keys if you prefer, but we must apply "cleanAmount"
-  });
-
-  // Re-implementing using your object-key style but with CLEANERS:
+  // Get data as objects (headers used as keys)
   const jsonRows = XLSX.utils.sheet_to_json<any>(sheet);
   
   return jsonRows.map((row, index) => {
-    // Normalize keys: handling "Debit", "debit", "DEBIT" variations
-    const getVal = (keyPart: string) => {
-      const key = Object.keys(row).find(k => k.toLowerCase().includes(keyPart.toLowerCase()));
-      return key ? row[key] : null;
+    // Helper: Find value case-insensitively across multiple possible header names
+    const getVal = (keyParts: string[]) => {
+      const keys = Object.keys(row);
+      const foundKey = keys.find(k => 
+        keyParts.some(part => k.toLowerCase().includes(part.toLowerCase()))
+      );
+      return foundKey ? row[foundKey] : null;
     };
 
-    const dateVal = getVal("date"); // Matches "Date", "Value Date", "Tx Date"
-    const debitVal = getVal("debit") || getVal("withdrawal");
-    const creditVal = getVal("credit") || getVal("deposit");
+    // 1. Map Fields (Flexible matching for different bank formats)
+    const dateVal = getVal(["date", "time"]); 
+    const debitVal = getVal(["debit", "withdrawal", "dr"]);
+    const creditVal = getVal(["credit", "deposit", "cr"]);
+    // Added Description Mapping
+    const descVal = getVal(["description", "narration", "particulars", "details"]);
 
+    // 2. Clean Data
     const debit = cleanAmount(debitVal);
     const credit = cleanAmount(creditVal);
     
-    // Determine type for your Transaction interface
-    // (Assuming your Transaction type has 'type' and 'amount' fields, 
-    // or if it strictly separates debit/credit, adjust accordingly)
-    
-    // If you need strictly the Transaction[] format we used in the UI:
+    // 3. Determine Amount & Type
     const amount = debit > 0 ? debit : credit;
-    const type = debit > 0 ? "DEBIT" : "CREDIT";
+    const type: "DEBIT" | "CREDIT" = debit > 0 ? "DEBIT" : "CREDIT";
 
     return {
-      id: `row-${index}`,
+      id: `row-${index}-${Date.now()}`,
       date: cleanDate(dateVal),
-      debit: debit,   // Keep these if your interface asks for them
-      credit: credit, // Keep these if your interface asks for them
-      amount: amount, // For the reconciler logic
-      type: type,     // For the reconciler logic
+      amount: amount,
+      type: type,
+      description: descVal ? String(descVal).trim() : "No Description", // Critical for UI
+      debit: debit,  // Optional: Keep if interface needs it
+      credit: credit, // Optional: Keep if interface needs it
       raw: JSON.stringify(row)
     };
   }).filter(tx => tx.amount > 0); // Remove empty rows

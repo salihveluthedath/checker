@@ -1,95 +1,99 @@
 import * as XLSX from "xlsx";
 import { Transaction } from "@/types/transaction";
 
-// --- HELPER 1: CLEAN NUMBERS (Fixes the "67 vs 67,675" bug) ---
-const parseAmount = (value: any): number => {
-  if (typeof value === "number") return value; // Already a number
+// --- HELPER 1: CLEAN NUMBERS ---
+const cleanAmount = (value: any): number => {
+  if (typeof value === "number") return value;
   if (!value) return 0;
-
-  // 1. Convert to string
-  let str = String(value);
-  
-  // 2. Remove all commas (Handle "1,00,000.00" -> "100000.00")
-  str = str.replace(/,/g, ""); 
-  
-  // 3. Remove currency symbols or text if any
-  str = str.replace(/[^\d.-]/g, ""); 
-
+  // Remove commas and cast to float
+  const str = String(value).replace(/,/g, "").trim();
   return parseFloat(str) || 0;
 };
 
-// --- HELPER 2: CLEAN DATES (Fixes the "02/04" Feb vs April bug) ---
-const parseDate = (value: any): string => {
-  if (!value) return "Invalid Date";
-
-  // Handle Excel Serial Numbers (e.g., 45385)
-  if (typeof value === 'number') {
+// --- HELPER 2: CLEAN DATES ---
+const cleanDate = (value: any): string => {
+  if (!value) return "";
+  
+  // 1. Handle Excel Serial Numbers (e.g., 45385)
+  if (typeof value === "number") {
+    // Excel base date is Dec 30, 1899
     const dateObj = new Date(Math.round((value - 25569) * 86400 * 1000));
-    return dateObj.toISOString().split('T')[0];
+    return dateObj.toISOString().split("T")[0];
   }
 
+  // 2. Handle DD/MM/YYYY Strings or YYYY-MM-DD
   const str = String(value).trim();
-
-  // Handle "DD/MM/YYYY" (Indian/UK format)
-  // Logic: Split by slash or dash
-  if (str.match(/^\d{1,2}[/-]\d{1,2}[/-]\d{4}$/)) {
-    const parts = str.split(/[/-]/);
-    const part1 = parseInt(parts[0]);
-    const part2 = parseInt(parts[1]);
-    const year = parts[2];
-
-    // Assumption: If first part > 12, it's definitely Day. 
-    // If your data is CONSISTENTLY DD/MM, force day = part1.
-    const day = part1;
-    const month = part2; 
-
-    // Return YYYY-MM-DD for consistency
-    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  
+  // If it matches DD/MM/YYYY or similar
+  if (str.includes("/")) {
+    const [part1, part2, part3] = str.split("/");
+    
+    // Heuristic: If first part is 4 digits, it's YYYY/MM/DD. Otherwise DD/MM/YYYY.
+    const isYearFirst = part1.length === 4;
+    
+    const year = isYearFirst ? part1 : part3;
+    const month = part2;
+    const day = isYearFirst ? part3 : part1;
+    
+    // Return YYYY-MM-DD
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
   }
 
-  // Fallback for standard ISO or other formats
+  // Fallback: try standard date parse
   try {
-    return new Date(str).toISOString().split('T')[0];
+      const d = new Date(str);
+      if(!isNaN(d.getTime())) return d.toISOString().split("T")[0];
   } catch (e) {
-    return str;
+      // ignore
   }
+  
+  return str;
 };
 
-export const parseExcel = async (file: File): Promise<Transaction[]> => {
-  const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data);
-  const sheetName = workbook.SheetNames[0];
-  const worksheet = workbook.Sheets[sheetName];
+export async function parseExcel(file: File): Promise<Transaction[]> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer);
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
   
-  // Get raw data (array of arrays)
-  const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+  // Get data as objects (headers used as keys)
+  const jsonRows = XLSX.utils.sheet_to_json<any>(sheet);
   
-  const transactions: Transaction[] = [];
+  return jsonRows.map((row, index) => {
+    // Helper to find value case-insensitively (e.g. finds "Debit", "debit", "DEBIT Amount")
+    const getVal = (keyParts: string[]) => {
+      const keys = Object.keys(row);
+      // Find a key that contains ANY of the keyParts
+      const foundKey = keys.find(k => 
+        keyParts.some(part => k.toLowerCase().includes(part.toLowerCase()))
+      );
+      return foundKey ? row[foundKey] : null;
+    };
 
-  // Skip header (start at index 1)
-  jsonData.slice(1).forEach((row, index) => {
-    // ADJUST THESE INDICES based on your specific Excel columns
-    // Based on your screenshots: Date(0), Debit(1), Credit(2)
+    // 1. Map Fields
+    const dateVal = getVal(["date", "time"]); 
+    const debitVal = getVal(["debit", "withdrawal", "dr"]);
+    const creditVal = getVal(["credit", "deposit", "cr"]);
+    const descVal = getVal(["description", "narration", "particulars", "details"]);
+
+    // 2. Clean Data
+    const debit = cleanAmount(debitVal);
+    const credit = cleanAmount(creditVal);
     
-    const rawDate = row[0];
-    const rawDebit = row[1];
-    const rawCredit = row[2];
+    // 3. Determine Amount & Type
+    // If both exist (rare), take the larger one, or rely on logic. 
+    // Usually only one is > 0.
+    const amount = debit > 0 ? debit : credit;
+    const type: "DEBIT" | "CREDIT" = debit > 0 ? "DEBIT" : "CREDIT";
 
-    const amountDebit = parseAmount(rawDebit);
-    const amountCredit = parseAmount(rawCredit);
-
-    let amount = 0;
-    let type: "DEBIT" | "CREDIT" = "DEBIT";
-
-    if (amountDebit > 0) {
-      amount = amountDebit;
-      type = "DEBIT";
-    } else if (amountCredit > 0) {
-      amount = amountCredit;
-      type = "CREDIT";
-    }
-
-    if (amount > 0) {
-      transactions.push({
-        id: `tx-${index}-${Math.random()}`,
-        date: parseDate(rawDate),
+    return {
+      id: `row-${index}-${Date.now()}`, // Unique ID
+      date: cleanDate(dateVal),
+      amount: amount,
+      type: type,
+      description: descVal ? String(descVal).trim() : "No Description",
+      // Optional: keep raw debit/credit if your UI needs them specifically
+      // debit: debit,
+      // credit: credit,
+    };
+  }).filter(tx => tx.amount > 0); // Remove empty rows or header artifacts
+}
