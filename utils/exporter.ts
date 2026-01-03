@@ -1,4 +1,5 @@
-import * as XLSX from 'xlsx';
+// utils/exporter.ts
+import * as XLSX from 'xlsx-js-style'; // <--- MUST USE THIS IMPORT
 import { MatchResult } from '@/types/reconciliation';
 import { differenceInDays, parseISO, format } from 'date-fns';
 
@@ -11,6 +12,54 @@ const getBucket = (days: number) => {
   return '360+';
 };
 
+// --- HELPER: Styles Configuration ---
+const styles = {
+  // The Big Centered Title at the top
+  mainTitle: {
+    font: { bold: true, sz: 14, name: "Calibri" },
+    alignment: { horizontal: "center", vertical: "center" },
+    fill: { fgColor: { rgb: "FFFFFF" } }
+  },
+  // The Gray Column Headers
+  tableHeader: {
+    font: { bold: true, name: "Calibri" },
+    alignment: { horizontal: "center", vertical: "center" },
+    fill: { fgColor: { rgb: "D9D9D9" } }, // Light Gray like screenshot
+    border: {
+      top: { style: "thin" }, bottom: { style: "thin" },
+      left: { style: "thin" }, right: { style: "thin" }
+    }
+  },
+  // Party Name Row (Bold Left)
+  partyHeaderLeft: {
+    font: { bold: true, name: "Calibri" },
+    border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }
+  },
+  // Party Total (Bold Right)
+  partyHeaderRight: {
+    font: { bold: true, name: "Calibri" },
+    alignment: { horizontal: "right" },
+    border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }
+  },
+  // Normal Data Cells
+  normalCell: {
+    font: { name: "Calibri" },
+    border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }
+  },
+  // Centered Data (Date/Days)
+  centerCell: {
+    font: { name: "Calibri" },
+    alignment: { horizontal: "center" },
+    border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }
+  },
+  // Footer/Total Row
+  footerRow: {
+    font: { bold: true, name: "Calibri" },
+    alignment: { horizontal: "right" },
+    border: { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } }
+  }
+};
+
 // --- FUNCTION 1: Download Match List (Standard) ---
 export const downloadReconciliationReport = (results: MatchResult[]) => {
   const data = results.map(item => ({
@@ -18,19 +67,15 @@ export const downloadReconciliationReport = (results: MatchResult[]) => {
     'Date': item.date,
     'Amount': item.amount,
     'Status': item.status, 
-    'Match Method': item.matchMethod || '-', 
-    'Ledger Ref ID': item.ledgerRef || '-',
     'Corrected Vh. No': item.correctedVoucherNo || '-'
   }));
-
   const worksheet = XLSX.utils.json_to_sheet(data);
-  worksheet['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 10 }, { wch: 20 }, { wch: 15 }, { wch: 15 }];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Reconciliation Report');
-  XLSX.writeFile(workbook, `Reconciliation_Report_${new Date().toISOString().split('T')[0]}.xlsx`);
+  XLSX.writeFile(workbook, `Match_List.xlsx`);
 };
 
-// --- FUNCTION 2: Download Ageing Report (Centered & Bold Header) ---
+// --- FUNCTION 2: PROFESSIONAL AGEING REPORT ---
 export const downloadAgeingReport = (results: MatchResult[]) => {
   const REPORT_DATE = new Date('2026-01-02');
   
@@ -43,7 +88,7 @@ export const downloadAgeingReport = (results: MatchResult[]) => {
 
   const uniqueParties = Object.keys(groups).sort();
   
-  // 2. Determine File Name & Header Title
+  // 2. Filename & Title Logic
   let fileName = `Ageing_Report.xlsx`;
   let mainTitle = "AGEING REPORT"; 
 
@@ -51,14 +96,14 @@ export const downloadAgeingReport = (results: MatchResult[]) => {
     const partyName = uniqueParties[0];
     const safeName = partyName.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "_");
     fileName = `${safeName}_Ageing.xlsx`;
-    mainTitle = partyName; // Use Party Name as Main Header
+    mainTitle = partyName; 
   }
 
-  // 3. Build Layout (Array of Arrays)
+  // 3. Build Data Rows
   const rows: any[][] = [];
 
-  // ROW 1: Main Header (Will be merged and centered)
-  rows.push([mainTitle]); 
+  // ROW 1: Main Title
+  rows.push([mainTitle, '', '', '', '', '', '', '', '']); 
 
   // ROW 2: Column Headers
   rows.push([
@@ -66,13 +111,11 @@ export const downloadAgeingReport = (results: MatchResult[]) => {
     '1 To 30 Days', '31 To 60 Days', '61 To 120 Days', '121 To 360 Days'
   ]);
 
-  // Track rows where Party Headers appear to bold them later
-  const partyHeaderRowIndices: number[] = [];
+  // Keep track of which rows need which styles
+  const stylingMap: { index: number, type: 'partyHeader' | 'detail' | 'total' }[] = [];
 
   uniqueParties.forEach(partyName => {
     const txns = groups[partyName];
-    
-    // Calculate Totals
     let totalAmt = 0;
     const bucketTotals: any = { '1-30': 0, '31-60': 0, '61-120': 0, '121-360': 0, '360+': 0 };
 
@@ -83,42 +126,43 @@ export const downloadAgeingReport = (results: MatchResult[]) => {
        if (bucketTotals[b] !== undefined) bucketTotals[b] += t.amount;
     });
 
-    // --- Party Header Row ---
-    partyHeaderRowIndices.push(rows.length); // Save index for styling
+    // --- A. PARTY HEADER ROW ---
+    stylingMap.push({ index: rows.length, type: 'partyHeader' });
     rows.push([
-      `${partyName}#`,  
-      totalAmt,         
+      `${partyName}#`,  // References (Bold Left)
+      totalAmt,         // Tot. Amt (Bold Right)
       '', '', '', '', '', '', ''
     ]);
 
-    // --- Detail Rows ---
+    // --- B. DETAIL ROWS ---
     txns.forEach(txn => {
       const txnDate = parseISO(txn.date);
       const days = differenceInDays(REPORT_DATE, txnDate);
       const bucket = getBucket(days);
 
+      stylingMap.push({ index: rows.length, type: 'detail' });
       rows.push([
         txn.correctedVoucherNo || txn.voucherNo, 
-        '',                                      
-        format(txnDate, 'dd/MM/yyyy'),           
-        days,                                    
-        txn.amount,                              
-        bucket === '1-30' ? txn.amount : '',     
-        bucket === '31-60' ? txn.amount : '',    
-        bucket === '61-120' ? txn.amount : '',   
-        bucket === '121-360' ? txn.amount : ''   
+        '', 
+        format(txnDate, 'dd/MM/yyyy'), 
+        days, 
+        txn.amount, 
+        bucket === '1-30' ? txn.amount : '', 
+        bucket === '31-60' ? txn.amount : '', 
+        bucket === '61-120' ? txn.amount : '', 
+        bucket === '121-360' ? txn.amount : '' 
       ]);
     });
 
-    // --- Footer Row ---
+    // --- C. FOOTER TOTAL ROW ---
+    stylingMap.push({ index: rows.length, type: 'total' });
     rows.push([
-      `${partyName} Total`,    
-      '', '', '',
-      totalAmt,                
-      bucketTotals['1-30'],    
-      bucketTotals['31-60'],   
-      bucketTotals['61-120'],  
-      bucketTotals['121-360']  
+      `${partyName} Total`, '', '', '', 
+      totalAmt, 
+      bucketTotals['1-30'], 
+      bucketTotals['31-60'], 
+      bucketTotals['61-120'], 
+      bucketTotals['121-360']
     ]);
 
     rows.push([]); // Spacer
@@ -127,85 +171,65 @@ export const downloadAgeingReport = (results: MatchResult[]) => {
   // 4. Create Sheet
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
 
-  // --- STYLING LOGIC ---
+  // --- 5. APPLY VISUAL STYLES ---
 
-  // A. Merge Main Header (A1 to I1) to Center it visually
+  // A. Main Title (Merged & Centered)
   if(!worksheet['!merges']) worksheet['!merges'] = [];
-  worksheet['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }); 
+  worksheet['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }); // Merge A1:I1
+  if(worksheet['A1']) worksheet['A1'].s = styles.mainTitle;
 
-  // B. Apply "Bold" and "Center" styles manually to the cell objects
-  // Note: This modifies the sheet object directly.
-  
-  // 1. Style Main Title (A1)
-  const mainHeaderCell = worksheet[XLSX.utils.encode_cell({r: 0, c: 0})];
-  if (mainHeaderCell) {
-    mainHeaderCell.s = { 
-      font: { bold: true, sz: 14 }, 
-      alignment: { horizontal: "center", vertical: "center" } 
-    };
-  }
-
-  // 2. Style Column Headers (Row 2, Index 1)
-  const colHeaderRowIndex = 1;
-  for (let c = 0; c <= 8; c++) {
-    const cellRef = XLSX.utils.encode_cell({r: colHeaderRowIndex, c: c});
-    if (worksheet[cellRef]) {
-      worksheet[cellRef].s = { 
-        font: { bold: true }, 
-        alignment: { horizontal: "center" },
-        fill: { fgColor: { rgb: "EEEEEE" } } // Light Gray Background
-      };
-    }
-  }
-
-  // 3. Style Party Headers (Name & Total)
-  partyHeaderRowIndices.forEach(rowIndex => {
-    // Party Name Cell (Col A)
-    const nameRef = XLSX.utils.encode_cell({r: rowIndex, c: 0});
-    if (worksheet[nameRef]) worksheet[nameRef].s = { font: { bold: true } };
-    
-    // Party Total Cell (Col B)
-    const totalRef = XLSX.utils.encode_cell({r: rowIndex, c: 1});
-    if (worksheet[totalRef]) worksheet[totalRef].s = { font: { bold: true } };
+  // B. Column Headers (Gray Background) - Row 1 (Index 1)
+  ['A','B','C','D','E','F','G','H','I'].forEach(col => {
+    const cell = worksheet[`${col}2`];
+    if(cell) cell.s = styles.tableHeader;
   });
 
-  // 5. Set Widths
+  // C. Row Styles Loop
+  stylingMap.forEach(item => {
+    const r = item.index; // Row Index
+    const rExcel = r + 1; // Excel 1-based Row Number
+
+    if (item.type === 'partyHeader') {
+      // Party Name
+      if(worksheet[`A${rExcel}`]) worksheet[`A${rExcel}`].s = styles.partyHeaderLeft;
+      // Party Total
+      if(worksheet[`B${rExcel}`]) worksheet[`B${rExcel}`].s = styles.partyHeaderRight;
+      // Empty Borders for the rest
+      ['C','D','E','F','G','H','I'].forEach(c => {
+         if(worksheet[`${c}${rExcel}`]) worksheet[`${c}${rExcel}`].s = styles.normalCell;
+      });
+    } 
+    else if (item.type === 'detail') {
+      // All cells get borders
+      ['A','B','E','F','G','H','I'].forEach(c => {
+        if(worksheet[`${c}${rExcel}`]) worksheet[`${c}${rExcel}`].s = styles.normalCell;
+      });
+      // Center Date & Days
+      if(worksheet[`C${rExcel}`]) worksheet[`C${rExcel}`].s = styles.centerCell;
+      if(worksheet[`D${rExcel}`]) worksheet[`D${rExcel}`].s = styles.centerCell;
+    }
+    else if (item.type === 'total') {
+      // Bold Text aligned Right for totals
+      ['A','B','C','D','E','F','G','H','I'].forEach(c => {
+         if(worksheet[`${c}${rExcel}`]) worksheet[`${c}${rExcel}`].s = styles.footerRow;
+      });
+    }
+  });
+
+  // 6. Column Widths (Matches screenshot)
   worksheet['!cols'] = [
-    { wch: 40 }, // A: References
-    { wch: 15 }, // B: Tot. Amt
-    { wch: 12 }, // C: Date
-    { wch: 8 },  // D: Days
-    { wch: 15 }, // E: Bill. Amt
-    { wch: 15 }, // F: 1-30
-    { wch: 15 }, // G: 31-60
-    { wch: 15 }, // H: 61-120
-    { wch: 15 }  // I: 121-360
+    { wch: 35 }, // Ref
+    { wch: 15 }, // Tot Amt
+    { wch: 12 }, // Date
+    { wch: 8 },  // Days
+    { wch: 15 }, // Bill Amt
+    { wch: 15 }, // 1-30
+    { wch: 15 }, // 31-60
+    { wch: 15 }, // 61-120
+    { wch: 15 }  // 121-360
   ];
 
-  // 6. Generate File
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, 'Ageing Report');
   XLSX.writeFile(workbook, fileName);
-};
-
-// --- FUNCTION 3: Single Party (Fallback) ---
-export const downloadSinglePartyReport = (results: MatchResult[], partyName: string) => {
-  const partyData = results.filter(r => r.partyName === partyName);
-  if (partyData.length === 0) { alert("No records found."); return; }
-
-  const data = partyData.map(item => ({
-    'Date': item.date,
-    'Party Name': item.partyName,
-    'Original Ref': item.voucherNo || '-',
-    'Corrected Vh. No': item.correctedVoucherNo || 'NOT FOUND',
-    'Amount': item.amount,
-    'Status': item.status,
-    'Match Type': item.matchMethod || '-'
-  }));
-
-  const worksheet = XLSX.utils.json_to_sheet(data);
-  worksheet['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 20 }];
-  const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, partyName.substring(0, 30));
-  XLSX.writeFile(workbook, `${partyName}_Corrected_Age_Due.xlsx`);
 };
