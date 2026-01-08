@@ -144,7 +144,8 @@ export default function DeonStockApp() {
       const imageMap: Record<number, string> = {};
       for (const image of targetWorksheet.getImages()) {
         const imgId = image.imageId;
-        const imgData = workbook.model.media.find(m => m.index === Number(imgId));
+        // FIX: Cast 'm' to any to avoid TypeScript error
+        const imgData = workbook.model.media.find((m: any) => m.index === Number(imgId));
         if (imgData) {
             const rowIndex = Math.floor(image.range.tl.nativeRow) + 1;
             const base64 = `data:${imgData.type};base64,${Buffer.from(imgData.buffer).toString('base64')}`;
@@ -487,7 +488,6 @@ export default function DeonStockApp() {
                   </td>
                   <td className="p-2 border-r border-black font-bold text-lg">{item.size}</td>
                   <td className="p-0 font-extrabold text-xl relative">
-                    {/* Using onBlur to trigger save instead of onChange to prevent DB spam */}
                     <input 
                         type="number" 
                         defaultValue={item.stock}
