@@ -1,11 +1,16 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/deon_stock';
+// 1. Get the connection string from the environment variable
+const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!MONGODB_URI) {
-  throw new Error('Please define the MONGODB_URI environment variable');
+  throw new Error(
+    'Please define the MONGODB_URI environment variable inside .env.local'
+  );
 }
 
+// 2. THIS IS THE MISSING PART CAUSING YOUR ERROR
+// We must define 'cached' outside the function so it persists
 let cached = (global as any).mongoose;
 
 if (!cached) {
@@ -13,14 +18,29 @@ if (!cached) {
 }
 
 async function dbConnect() {
-  if (cached.conn) return cached.conn;
+  // 3. Now 'cached' is defined, so this line will work
+  if (cached.conn) {
+    return cached.conn;
+  }
 
   if (!cached.promise) {
-    cached.promise = mongoose.connect(MONGODB_URI, {
+    const opts = {
       bufferCommands: false,
-    }).then((mongoose) => mongoose);
+    };
+
+    cached.promise = mongoose.connect(MONGODB_URI!, opts).then((mongoose) => {
+      console.log("✅ SUCCESSFULLY CONNECTED TO MONGODB!"); // Connection Log
+      return mongoose;
+    });
   }
-  cached.conn = await cached.promise;
+
+  try {
+    cached.conn = await cached.promise;
+  } catch (e) {
+    cached.promise = null;
+    throw e;
+  }
+
   return cached.conn;
 }
 

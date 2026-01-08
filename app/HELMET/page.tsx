@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import ExcelJS from 'exceljs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Upload, Search, Image as ImageIcon, Download, RefreshCw, Trash2, FileQuestion, Save, Camera, FileText, ImagePlus, Cloud, CheckCircle } from 'lucide-react';
+import { Upload, Search, Image as ImageIcon, Download, RefreshCw, Trash2, FileQuestion, Save, Camera, FileText, ImagePlus, CheckCircle } from 'lucide-react';
 
 interface DisplayItem {
   id: number;
@@ -26,7 +26,7 @@ export default function DeonStockApp() {
   const [bannerImage, setBannerImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- 1. LOAD DATA FROM MONGODB ON STARTUP ---
+  // --- 1. LOAD DATA ---
   useEffect(() => {
     fetchItems();
     const savedBanner = localStorage.getItem('deon_banner_img');
@@ -34,15 +34,14 @@ export default function DeonStockApp() {
   }, []);
 
   const fetchItems = async () => {
-    setDebugMsg('Loading from Database...');
+    setDebugMsg('Loading Database...');
     try {
       const res = await fetch('/api/stock');
       if (res.ok) {
-        const data = await res.json();
-        setItems(data);
+        setItems(await res.json());
         setDebugMsg('');
       } else {
-        setDebugMsg('Failed to load data.');
+        setDebugMsg('Failed to load.');
       }
     } catch (error) {
       console.error(error);
@@ -50,10 +49,9 @@ export default function DeonStockApp() {
     }
   };
 
-  // --- 2. SAVE TO MONGODB HELPER ---
   const saveToCloud = async (newItems: DisplayItem[]) => {
       setIsSaving(true);
-      setDebugMsg('Saving to Cloud...');
+      setDebugMsg('Saving...');
       try {
           await fetch('/api/stock', {
               method: 'POST',
@@ -70,7 +68,6 @@ export default function DeonStockApp() {
       }
   };
 
-  // --- HELPER: Safely extract text ---
   const getSafeValue = (cell: ExcelJS.Cell): string => {
     if (!cell || cell.value === null || cell.value === undefined) return '';
     if (typeof cell.value === 'object' && 'richText' in cell.value) {
@@ -88,7 +85,6 @@ export default function DeonStockApp() {
   const processExcelData = async (buffer: ArrayBuffer) => {
     setIsProcessing(true);
     setDebugMsg('Processing File...');
-    
     try {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(buffer);
@@ -105,15 +101,10 @@ export default function DeonStockApp() {
             row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
                  safeRowValues[colNumber] = getSafeValue(cell).toLowerCase().trim().replace(/[*]/g, '').trim(); 
             });
-
             const pIndex = safeRowValues.findIndex(c => c && (c.includes('part') || c.includes('code') || c.includes('item') || c.includes('mrp')));
             const sIndex = safeRowValues.findIndex(c => c && (c.includes('stock') || c.includes('qty') || c.includes('quantity') || c.includes('bal')));
-            
             let dIndex = safeRowValues.findIndex(c => c && (c.includes('description') || c.includes('desc')));
-            if (dIndex === -1) {
-                dIndex = safeRowValues.findIndex(c => c && (c.includes('name') || c.includes('particulars')));
-            }
-
+            if (dIndex === -1) dIndex = safeRowValues.findIndex(c => c && (c.includes('name') || c.includes('particulars')));
             const zIndex = safeRowValues.findIndex(c => c === 'size' || c === 'sz');
 
             if ((pIndex !== -1 || dIndex !== -1) && sIndex !== -1) {
@@ -144,7 +135,6 @@ export default function DeonStockApp() {
       const imageMap: Record<number, string> = {};
       for (const image of targetWorksheet.getImages()) {
         const imgId = image.imageId;
-        // FIX: Cast 'm' to any to avoid TypeScript error
         const imgData = workbook.model.media.find((m: any) => m.index === Number(imgId));
         if (imgData) {
             const rowIndex = Math.floor(image.range.tl.nativeRow) + 1;
@@ -156,11 +146,7 @@ export default function DeonStockApp() {
       const newItems: DisplayItem[] = [];
       targetWorksheet.eachRow((row, rowNumber) => {
         if (rowNumber <= headerRowIndex) return;
-
-        const getVal = (idx: number) => {
-           if (idx === -1) return '';
-           return getSafeValue(row.getCell(idx)).trim();
-        };
+        const getVal = (idx: number) => idx === -1 ? '' : getSafeValue(row.getCell(idx)).trim();
 
         const rawPartNo = colMap.part !== -1 ? getVal(colMap.part) : getVal(colMap.desc);
         const rawStockStr = colMap.stock !== -1 ? getVal(colMap.stock) : '0';
@@ -206,7 +192,6 @@ export default function DeonStockApp() {
         });
       });
 
-      // MERGE LOGIC
       let mergedItems = [...items];
       newItems.forEach(newItem => {
           const existingIndex = mergedItems.findIndex(old => old.code.toLowerCase() === newItem.code.toLowerCase());
@@ -219,7 +204,7 @@ export default function DeonStockApp() {
       });
       
       setItems(mergedItems);
-      saveToCloud(mergedItems); // SAVE TO DB
+      saveToCloud(mergedItems);
       setIsProcessing(false);
 
     } catch (err: any) {
@@ -229,26 +214,118 @@ export default function DeonStockApp() {
     }
   };
 
+  // --- EXCEL EXPORT (PERFECT CENTERED SQUARE IMAGES) ---
+  const handleExportExcel = async () => {
+    const exportItems = items.filter(item => item.stock > 0);
+    if (exportItems.length === 0) {
+        alert("No items with stock > 0!");
+        return;
+    }
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Stock List');
+
+    // Title
+    ws.mergeCells('A1:E1');
+    const titleCell = ws.getCell('A1');
+    titleCell.value = 'DEON AUTO ACCESSORIES';
+    titleCell.font = { name: 'Helvetica', size: 16, bold: true, color: { argb: 'FF1E64C8' } };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
+    ws.getRow(1).height = 30;
+
+    // Headers
+    const headerRow = ws.getRow(2);
+    headerRow.values = ['NO', 'ITEM CODE/MRP', 'PICTURE', 'SIZE', 'STOCK'];
+    headerRow.height = 25;
+    
+    const borderStyle: Partial<ExcelJS.Borders> = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'thin' },
+        right: { style: 'thin' }
+    };
+
+    headerRow.eachCell((cell) => {
+        cell.font = { bold: true, size: 12 };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.border = borderStyle;
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+    });
+
+    // --- SETUP: Ensure Cell is slightly larger than the image ---
+    ws.getColumn(1).width = 8;   // NO
+    ws.getColumn(2).width = 40;  // ITEM CODE
+    ws.getColumn(3).width = 22;  // PICTURE (Width 22 ≈ 150px)
+    ws.getColumn(4).width = 12;  // SIZE
+    ws.getColumn(5).width = 12;  // STOCK
+
+    let currentRow = 3;
+    exportItems.forEach((item, index) => {
+        const row = ws.getRow(currentRow);
+        row.values = [
+            index + 1,
+            `${item.code}${item.mrp ? ` (${item.mrp})` : ''}`,
+            '', 
+            item.size,
+            item.stock
+        ];
+
+        // Row Height 105 ≈ 140px. 
+        // We will put a 100px image inside this 140px space.
+        row.height = 105;
+
+        row.eachCell((cell) => {
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+            cell.font = { size: 12 };
+            cell.border = borderStyle;
+        });
+
+        row.getCell(2).font = { bold: true, size: 12 };
+
+        if (item.image) {
+            const imageId = wb.addImage({
+                base64: item.image,
+                extension: 'png',
+            });
+            
+            // --- FIX: Center Image using Offsets + Fixed Size ---
+            // 'tl': col 2.3 pushes it ~30% into the cell (centering horizontally)
+            // 'tl': row + 0.1 pushes it slightly down (centering vertically)
+            // 'ext': Forces exact 100x100 pixel size (Perfect Square, No Stretch)
+            ws.addImage(imageId, {
+                tl: { col: 2.3, row: currentRow - 1 + 0.1 }, 
+                ext: { width: 100, height: 100 }, 
+                editAs: 'oneCell' 
+            });
+        }
+        
+        currentRow++;
+    });
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Deon_Stock_List.xlsx';
+    a.click();
+  };
+
   const handleExportPDF = () => {
     const doc = new jsPDF();
     const exportItems = items.filter(item => item.stock > 0);
 
-    if (exportItems.length === 0) {
-        alert("No items with stock > 0 to export!");
-        return;
-    }
+    if (exportItems.length === 0) { alert("No items to export!"); return; }
 
     doc.setTextColor(30, 100, 200); 
     doc.setFontSize(22);
     doc.setFont('helvetica', 'bold');
     doc.text("DEON AUTO ACCESSORIES", 14, 20);
-    
     doc.setDrawColor(30, 100, 200);
     doc.setLineWidth(0.5);
     doc.line(14, 22, 110, 22);
 
     let startY = 30;
-
     if (bannerImage) {
         doc.addImage(bannerImage, 'JPEG', 14, 25, 180, 40); 
         startY = 70; 
@@ -290,11 +367,7 @@ export default function DeonStockApp() {
             1: { cellWidth: 70, fontStyle: 'bold' },
             2: { cellWidth: 40, halign: 'center' },
             3: { cellWidth: 20, halign: 'center' },
-            4: { 
-                cellWidth: 25, 
-                halign: 'center', 
-                fontStyle: 'bold',
-            }
+            4: { cellWidth: 25, halign: 'center', fontStyle: 'bold' }
         },
         didDrawCell: (data) => {
             if (data.section === 'body' && data.column.index === 2) {
@@ -313,7 +386,6 @@ export default function DeonStockApp() {
             }
         }
     });
-
     doc.save(`Deon_Stock_List.pdf`);
   };
 
@@ -324,7 +396,7 @@ export default function DeonStockApp() {
           reader.onload = (ev) => {
               const res = ev.target?.result as string;
               setBannerImage(res);
-              localStorage.setItem('deon_banner_img', res); // Banner stays local for now
+              localStorage.setItem('deon_banner_img', res);
           };
           reader.readAsDataURL(file);
       }
@@ -338,7 +410,7 @@ export default function DeonStockApp() {
               const newImg = ev.target?.result as string;
               const newItems = items.map(item => item.id === id ? { ...item, image: newImg } : item);
               setItems(newItems);
-              saveToCloud(newItems); // SAVE TO DB
+              saveToCloud(newItems);
           };
           reader.readAsDataURL(file);
       }
@@ -355,9 +427,9 @@ export default function DeonStockApp() {
   };
 
   const handleClearData = async () => {
-      if(confirm("Are you sure you want to clear all data from the database?")) {
+      if(confirm("Clear ALL data from cloud database?")) {
           setItems([]);
-          saveToCloud([]); // CLEARS DB
+          saveToCloud([]); 
           localStorage.removeItem('deon_banner_img');
           setBannerImage(null);
       }
@@ -367,26 +439,8 @@ export default function DeonStockApp() {
     const newStock = parseFloat(val);
     const updatedItems = items.map(item => item.id === id ? { ...item, stock: isNaN(newStock) ? 0 : newStock } : item);
     setItems(updatedItems);
-    
-    // Debounce save (wait 1 sec before saving to avoid spamming DB)
     const timeoutId = setTimeout(() => saveToCloud(updatedItems), 1000);
     return () => clearTimeout(timeoutId);
-  };
-
-  const handleExport = async () => {
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('Stock');
-    ws.addRow(['Description', 'PartNo', 'Stock']); 
-    items.forEach(item => {
-        ws.addRow([item.originalDesc, item.originalPartNo, item.stock]);
-    });
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'Updated_Stock.xlsx';
-    a.click();
   };
 
   const filtered = items.filter(i => 
@@ -427,7 +481,7 @@ export default function DeonStockApp() {
               
               {items.length > 0 && (
                 <>
-                  <button onClick={handleExport} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded shadow hover:bg-green-700 h-10 transition-active active:scale-95">
+                  <button onClick={handleExportExcel} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded shadow hover:bg-green-700 h-10 transition-active active:scale-95">
                     <Download size={18} /> <span className="font-bold text-sm">Excel</span>
                   </button>
                   <button onClick={handleExportPDF} className="flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded shadow hover:bg-red-700 h-10 transition-active active:scale-95">
