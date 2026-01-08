@@ -1,16 +1,6 @@
 import mongoose from 'mongoose';
 
-// 1. Get the connection string from the environment variable
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  throw new Error(
-    'Please define the MONGODB_URI environment variable inside .env.local'
-  );
-}
-
-// 2. THIS IS THE MISSING PART CAUSING YOUR ERROR
-// We must define 'cached' outside the function so it persists
+// 1. KEEP THIS OUTSIDE (Fixes "cached is not defined")
 let cached = (global as any).mongoose;
 
 if (!cached) {
@@ -18,7 +8,16 @@ if (!cached) {
 }
 
 async function dbConnect() {
-  // 3. Now 'cached' is defined, so this line will work
+  // 2. MOVE THIS INSIDE (Fixes "Build error")
+  // We only check for the password when we actually try to connect.
+  const MONGODB_URI = process.env.MONGODB_URI;
+
+  if (!MONGODB_URI) {
+    throw new Error(
+      'Please define the MONGODB_URI environment variable inside .env.local'
+    );
+  }
+
   if (cached.conn) {
     return cached.conn;
   }
@@ -28,8 +27,8 @@ async function dbConnect() {
       bufferCommands: false,
     };
 
-    cached.promise = mongoose.connect(MONGODB_URI!, opts).then((mongoose) => {
-      console.log("✅ SUCCESSFULLY CONNECTED TO MONGODB!"); // Connection Log
+    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
+      console.log("✅ SUCCESSFULLY CONNECTED TO MONGODB!");
       return mongoose;
     });
   }
