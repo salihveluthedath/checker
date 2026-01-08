@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 
-// 1. KEEP THIS OUTSIDE (Fixes "cached is not defined")
+// 1. DEFINE CACHED VARIABLE OUTSIDE (Global Scope)
+// Do NOT put the MONGODB_URI check here. It will crash the build.
 let cached = (global as any).mongoose;
 
 if (!cached) {
@@ -8,8 +9,8 @@ if (!cached) {
 }
 
 async function dbConnect() {
-  // 2. MOVE THIS INSIDE (Fixes "Build error")
-  // We only check for the password when we actually try to connect.
+  // 2. CHECK FOR PASSWORD INSIDE THE FUNCTION
+  // This ensures the app is fully loaded before we look for the password.
   const MONGODB_URI = process.env.MONGODB_URI;
 
   if (!MONGODB_URI) {
@@ -18,6 +19,7 @@ async function dbConnect() {
     );
   }
 
+  // 3. Connect to Database
   if (cached.conn) {
     return cached.conn;
   }
