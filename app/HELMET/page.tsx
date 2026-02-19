@@ -15,11 +15,13 @@ interface DisplayItem {
   image: string;
   originalDesc: string;
   originalPartNo: string;
+  brand?: 'RE' | 'AXXIS'; 
 }
 
 export default function DeonStockApp() {
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeBrand, setActiveBrand] = useState<'RE' | 'AXXIS'>('RE'); 
   const [debugMsg, setDebugMsg] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -38,7 +40,25 @@ export default function DeonStockApp() {
     try {
       const res = await fetch('/api/stock');
       if (res.ok) {
-        setItems(await res.json());
+        const data = await res.json();
+        
+        // --- BULLETPROOF OVERRIDE ADDED HERE ---
+        // This stops the database from pushing Axxis items back to RE!
+        const patchedData = data.map((item: DisplayItem) => {
+          const desc = item.originalDesc || '';
+          const code = item.code || '';
+          const isAxxis = desc.toLowerCase().includes('axxis') || code.toLowerCase().startsWith('ax');
+          
+          let correctBrand = item.brand || 'RE';
+          if (isAxxis) correctBrand = 'AXXIS'; // Force it to Axxis tab
+
+          return {
+            ...item,
+            brand: correctBrand
+          };
+        });
+
+        setItems(patchedData);
         setDebugMsg('');
       } else {
         setDebugMsg('Failed to load.');
@@ -71,13 +91,13 @@ export default function DeonStockApp() {
   const getSafeValue = (cell: ExcelJS.Cell): string => {
     if (!cell || cell.value === null || cell.value === undefined) return '';
     if (typeof cell.value === 'object' && 'richText' in cell.value) {
-       return cell.value.richText.map((t) => t.text).join('');
+       return (cell.value as any).richText.map((t: any) => t.text).join('');
     }
     if (typeof cell.value === 'object' && 'result' in cell.value) {
-       return String(cell.value.result);
+       return String((cell.value as any).result);
     }
     if (typeof cell.value === 'object' && 'text' in cell.value) {
-       return String(cell.value.text);
+       return String((cell.value as any).text);
     }
     return String(cell.value);
   };
@@ -180,6 +200,8 @@ export default function DeonStockApp() {
             size = sizeMatch ? sizeMatch[1].toUpperCase() : '-';
         }
 
+        const detectedBrand = activeBrand;
+
         newItems.push({
           id: rowNumber, 
           code: code || "Unknown",
@@ -188,7 +210,8 @@ export default function DeonStockApp() {
           stock: rawStock,
           image: imageMap[rowNumber] || '',
           originalDesc: rawDesc,
-          originalPartNo: rawPartNo
+          originalPartNo: rawPartNo,
+          brand: detectedBrand 
         });
       });
 
@@ -198,6 +221,7 @@ export default function DeonStockApp() {
           if (existingIndex !== -1) {
               mergedItems[existingIndex].stock = newItem.stock;
               if (newItem.image) mergedItems[existingIndex].image = newItem.image; 
+              mergedItems[existingIndex].brand = newItem.brand; 
           } else {
               mergedItems.push({ ...newItem, id: mergedItems.length + 1 });
           }
@@ -214,26 +238,23 @@ export default function DeonStockApp() {
     }
   };
 
-  // --- EXCEL EXPORT (PERFECT CENTERED SQUARE IMAGES) ---
   const handleExportExcel = async () => {
-    const exportItems = items.filter(item => item.stock > 0);
+    const exportItems = items.filter(item => (item.brand || 'RE') === activeBrand && item.stock > 0);
     if (exportItems.length === 0) {
-        alert("No items with stock > 0!");
+        alert(`No ${activeBrand} items with stock > 0!`);
         return;
     }
 
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Stock List');
 
-    // Title
     ws.mergeCells('A1:E1');
     const titleCell = ws.getCell('A1');
-    titleCell.value = 'DEON AUTO ACCESSORIES';
+    titleCell.value = `DEON AUTO ACCESSORIES - ${activeBrand}`;
     titleCell.font = { name: 'Helvetica', size: 16, bold: true, color: { argb: 'FF1E64C8' } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
     ws.getRow(1).height = 30;
 
-    // Headers
     const headerRow = ws.getRow(2);
     headerRow.values = ['NO', 'ITEM CODE/MRP', 'PICTURE', 'SIZE', 'STOCK'];
     headerRow.height = 25;
@@ -252,12 +273,11 @@ export default function DeonStockApp() {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
     });
 
-    // --- SETUP: Ensure Cell is slightly larger than the image ---
-    ws.getColumn(1).width = 8;   // NO
-    ws.getColumn(2).width = 40;  // ITEM CODE
-    ws.getColumn(3).width = 22;  // PICTURE (Width 22 ≈ 150px)
-    ws.getColumn(4).width = 12;  // SIZE
-    ws.getColumn(5).width = 12;  // STOCK
+    ws.getColumn(1).width = 8;   
+    ws.getColumn(2).width = 40;  
+    ws.getColumn(3).width = 22;  
+    ws.getColumn(4).width = 12;  
+    ws.getColumn(5).width = 12;  
 
     let currentRow = 3;
     exportItems.forEach((item, index) => {
@@ -269,11 +289,7 @@ export default function DeonStockApp() {
             item.size,
             item.stock
         ];
-
-        // Row Height 105 ≈ 140px. 
-        // We will put a 100px image inside this 140px space.
         row.height = 105;
-
         row.eachCell((cell) => {
             cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
             cell.font = { size: 12 };
@@ -287,18 +303,12 @@ export default function DeonStockApp() {
                 base64: item.image,
                 extension: 'png',
             });
-            
-            // --- FIX: Center Image using Offsets + Fixed Size ---
-            // 'tl': col 2.3 pushes it ~30% into the cell (centering horizontally)
-            // 'tl': row + 0.1 pushes it slightly down (centering vertically)
-            // 'ext': Forces exact 100x100 pixel size (Perfect Square, No Stretch)
             ws.addImage(imageId, {
                 tl: { col: 2.3, row: currentRow - 1 + 0.1 }, 
                 ext: { width: 100, height: 100 }, 
                 editAs: 'oneCell' 
             });
         }
-        
         currentRow++;
     });
 
@@ -307,20 +317,20 @@ export default function DeonStockApp() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'Deon_Stock_List.xlsx';
+    a.download = `Deon_${activeBrand}_Stock.xlsx`;
     a.click();
   };
 
   const handleExportPDF = () => {
     const doc = new jsPDF();
-    const exportItems = items.filter(item => item.stock > 0);
+    const exportItems = items.filter(item => (item.brand || 'RE') === activeBrand && item.stock > 0);
 
-    if (exportItems.length === 0) { alert("No items to export!"); return; }
+    if (exportItems.length === 0) { alert(`No ${activeBrand} items to export!`); return; }
 
     doc.setTextColor(30, 100, 200); 
     doc.setFontSize(22);
     doc.setFont('helvetica', 'bold');
-    doc.text("DEON AUTO ACCESSORIES", 14, 20);
+    doc.text(`DEON ${activeBrand} STOCK`, 14, 20);
     doc.setDrawColor(30, 100, 200);
     doc.setLineWidth(0.5);
     doc.line(14, 22, 110, 22);
@@ -386,7 +396,7 @@ export default function DeonStockApp() {
             }
         }
     });
-    doc.save(`Deon_Stock_List.pdf`);
+    doc.save(`Deon_${activeBrand}_Stock.pdf`);
   };
 
   const handleBannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -427,11 +437,10 @@ export default function DeonStockApp() {
   };
 
   const handleClearData = async () => {
-      if(confirm("Clear ALL data from cloud database?")) {
-          setItems([]);
-          saveToCloud([]); 
-          localStorage.removeItem('deon_banner_img');
-          setBannerImage(null);
+      if(confirm(`Clear ALL data for ${activeBrand} from cloud database?`)) {
+          const remainingItems = items.filter(i => (i.brand || 'RE') !== activeBrand);
+          setItems(remainingItems);
+          saveToCloud(remainingItems); 
       }
   };
 
@@ -443,10 +452,20 @@ export default function DeonStockApp() {
     return () => clearTimeout(timeoutId);
   };
 
-  const filtered = items.filter(i => 
-    i.code.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    i.originalDesc.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleSizeChange = (id: number, val: string) => {
+    const updatedItems = items.map(item => item.id === id ? { ...item, size: val.trim().toUpperCase() } : item);
+    setItems(updatedItems);
+    const timeoutId = setTimeout(() => saveToCloud(updatedItems), 1000);
+    return () => clearTimeout(timeoutId);
+  };
+
+  const filtered = items.filter(i => {
+    const itemBrand = i.brand || 'RE'; 
+    return itemBrand === activeBrand && (
+      i.code.toLowerCase().includes(searchTerm.toLowerCase()) || 
+      i.originalDesc.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
 
   return (
     <div className="min-h-screen bg-white text-black font-sans p-4 md:p-8">
@@ -455,16 +474,29 @@ export default function DeonStockApp() {
           <div className="flex justify-between items-start">
              <div>
                 <h1 className="text-3xl md:text-4xl font-extrabold text-blue-600 italic uppercase tracking-tighter">
-                    DEON AUTO ACCESSORIES
+                    DEON {activeBrand} <span className="text-gray-300">/</span> STOCK
                 </h1>
                 <p className="text-xs text-gray-500 font-mono mt-1">CLOUD SYNC ACTIVE</p>
              </div>
-             {(debugMsg || isProcessing || isSaving) && (
-                <div className="px-4 py-2 bg-blue-50 text-blue-700 text-sm rounded flex items-center gap-2 font-bold shadow-sm">
-                    {isProcessing || isSaving ? <RefreshCw className="animate-spin" size={16} /> : <CheckCircle size={16} />}
-                    {debugMsg || "Ready"}
-                </div>
-             )}
+
+             <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200 shadow-sm">
+                <button 
+                  onClick={() => setActiveBrand('RE')}
+                  className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${
+                    activeBrand === 'RE' ? 'bg-white shadow-md text-blue-600' : 'text-gray-500'
+                  }`}
+                >
+                  RE SERIES
+                </button>
+                <button 
+                  onClick={() => setActiveBrand('AXXIS')}
+                  className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${
+                    activeBrand === 'AXXIS' ? 'bg-white shadow-md text-red-600' : 'text-gray-500'
+                  }`}
+                >
+                  AXXIS SERIES
+                </button>
+             </div>
           </div>
           
           <div className="mt-6 flex flex-col md:flex-row gap-4 items-center">
@@ -498,7 +530,7 @@ export default function DeonStockApp() {
             </div>
             <div className="relative flex-1 w-full">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-              <input type="text" placeholder="Search..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} 
+              <input type="text" placeholder={`Search ${activeBrand} models...`} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} 
                 className="w-full pl-10 pr-4 h-10 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
             </div>
           </div>
@@ -511,7 +543,7 @@ export default function DeonStockApp() {
                 <th className="p-3 border-r border-black w-12 text-center">NO</th>
                 <th className="p-3 border-r border-black w-1/3 text-center">ITEM CODE/MRP</th>
                 <th className="p-3 border-r border-black text-center">PICTURE</th>
-                <th className="p-3 border-r border-black w-16 text-center">SIZE</th>
+                <th className="p-3 border-r border-black w-24 text-center">SIZE</th>
                 <th className="p-3 text-center w-24 border-l border-black">STOCK</th>
               </tr>
             </thead>
@@ -540,13 +572,22 @@ export default function DeonStockApp() {
                         </label>
                     </div>
                   </td>
-                  <td className="p-2 border-r border-black font-bold text-lg">{item.size}</td>
+                  
+                  <td className="p-0 border-r border-black font-bold text-lg relative">
+                    <input 
+                        type="text" 
+                        defaultValue={item.size}
+                        onBlur={(e) => handleSizeChange(item.id, e.target.value)}
+                        className="w-full h-full min-h-[96px] text-center font-bold text-lg focus:bg-gray-50 outline-none p-2 bg-transparent uppercase" 
+                    />
+                  </td>
+
                   <td className="p-0 font-extrabold text-xl relative">
                     <input 
                         type="number" 
                         defaultValue={item.stock}
                         onBlur={(e) => handleStockChange(item.id, e.target.value)}
-                        className="w-full h-full text-center font-extrabold text-xl focus:bg-gray-50 outline-none p-2 bg-white" 
+                        className="w-full h-full min-h-[96px] text-center font-extrabold text-xl focus:bg-gray-50 outline-none p-2 bg-transparent" 
                     />
                   </td>
                 </tr>
@@ -555,7 +596,9 @@ export default function DeonStockApp() {
                   <td colSpan={5} className="p-10 text-center text-gray-400">
                     <div className="flex flex-col items-center opacity-50">
                         <FileQuestion size={48} />
-                        <p className="mt-2">{items.length === 0 ? "Database is empty." : "No items found."}</p>
+                        <p className="mt-2 font-bold uppercase tracking-widest text-sm">
+                          {items.length === 0 ? "Database is empty." : `No ${activeBrand} items found.`}
+                        </p>
                     </div>
                   </td>
                 </tr>
