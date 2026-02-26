@@ -215,20 +215,29 @@ export default function DeonStockApp() {
         });
       });
 
-      let mergedItems = [...items];
-      newItems.forEach(newItem => {
-          const existingIndex = mergedItems.findIndex(old => old.code.toLowerCase() === newItem.code.toLowerCase());
-          if (existingIndex !== -1) {
-              mergedItems[existingIndex].stock = newItem.stock;
-              if (newItem.image) mergedItems[existingIndex].image = newItem.image; 
-              mergedItems[existingIndex].brand = newItem.brand; 
-          } else {
-              mergedItems.push({ ...newItem, id: mergedItems.length + 1 });
-          }
+      // --- ASYNC FIX: Update state functionally to prevent stale data overwrites ---
+      setItems(prevItems => {
+          let mergedItems = [...prevItems];
+          
+          newItems.forEach(newItem => {
+              const existingIndex = mergedItems.findIndex(old => old.code.toLowerCase() === newItem.code.toLowerCase());
+              if (existingIndex !== -1) {
+                  mergedItems[existingIndex] = {
+                      ...mergedItems[existingIndex],
+                      stock: newItem.stock,
+                      brand: newItem.brand,
+                      image: newItem.image ? newItem.image : mergedItems[existingIndex].image
+                  };
+              } else {
+                  mergedItems.push({ ...newItem, id: mergedItems.length + 1 });
+              }
+          });
+
+          // Schedule save immediately after state updates
+          setTimeout(() => saveToCloud(mergedItems), 0);
+          return mergedItems;
       });
       
-      setItems(mergedItems);
-      saveToCloud(mergedItems);
       setIsProcessing(false);
 
     } catch (err: any) {
@@ -412,15 +421,21 @@ export default function DeonStockApp() {
       }
   };
 
+  // --- ASYNC FIX: Update state functionally for image uploads ---
   const handleImageUpload = (id: number, e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
           const reader = new FileReader();
           reader.onload = (ev) => {
               const newImg = ev.target?.result as string;
-              const newItems = items.map(item => item.id === id ? { ...item, image: newImg } : item);
-              setItems(newItems);
-              saveToCloud(newItems);
+              
+              setItems(prevItems => {
+                  const newItems = prevItems.map(item => 
+                    item.id === id ? { ...item, image: newImg } : item
+                  );
+                  setTimeout(() => saveToCloud(newItems), 0);
+                  return newItems;
+              });
           };
           reader.readAsDataURL(file);
       }
@@ -444,19 +459,31 @@ export default function DeonStockApp() {
       }
   };
 
+  // --- ASYNC FIX: Update state functionally for manual stock edits ---
   const handleStockChange = (id: number, val: string) => {
     const newStock = parseFloat(val);
-    const updatedItems = items.map(item => item.id === id ? { ...item, stock: isNaN(newStock) ? 0 : newStock } : item);
-    setItems(updatedItems);
-    const timeoutId = setTimeout(() => saveToCloud(updatedItems), 1000);
-    return () => clearTimeout(timeoutId);
+    const finalStock = isNaN(newStock) ? 0 : newStock;
+
+    setItems(prevItems => {
+      const updatedItems = prevItems.map(item => 
+        item.id === id ? { ...item, stock: finalStock } : item
+      );
+      setTimeout(() => saveToCloud(updatedItems), 0);
+      return updatedItems;
+    });
   };
 
+  // --- ASYNC FIX: Update state functionally for manual size edits ---
   const handleSizeChange = (id: number, val: string) => {
-    const updatedItems = items.map(item => item.id === id ? { ...item, size: val.trim().toUpperCase() } : item);
-    setItems(updatedItems);
-    const timeoutId = setTimeout(() => saveToCloud(updatedItems), 1000);
-    return () => clearTimeout(timeoutId);
+    const finalSize = val.trim().toUpperCase();
+
+    setItems(prevItems => {
+      const updatedItems = prevItems.map(item => 
+        item.id === id ? { ...item, size: finalSize } : item
+      );
+      setTimeout(() => saveToCloud(updatedItems), 0);
+      return updatedItems;
+    });
   };
 
   const filtered = items.filter(i => {
@@ -474,7 +501,7 @@ export default function DeonStockApp() {
           <div className="flex justify-between items-start">
              <div>
                 <h1 className="text-3xl md:text-4xl font-extrabold text-blue-600 italic uppercase tracking-tighter">
-                    DEON {activeBrand} <span className="text-gray-300">/</span> STOCK
+                  DEON {activeBrand} <span className="text-gray-300">/</span> STOCK
                 </h1>
                 <p className="text-xs text-gray-500 font-mono mt-1">CLOUD SYNC ACTIVE</p>
              </div>
