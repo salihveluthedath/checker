@@ -38,19 +38,18 @@ export default function DeonStockApp() {
   const fetchItems = async () => {
     setDebugMsg('Loading Database...');
     try {
-      const res = await fetch('/api/stock');
+      // Force fetching fresh data by adding a timestamp cache-buster
+      const res = await fetch(`/api/stock?t=${new Date().getTime()}`);
       if (res.ok) {
         const data = await res.json();
         
-        // --- BULLETPROOF OVERRIDE ADDED HERE ---
-        // This stops the database from pushing Axxis items back to RE!
         const patchedData = data.map((item: DisplayItem) => {
           const desc = item.originalDesc || '';
           const code = item.code || '';
           const isAxxis = desc.toLowerCase().includes('axxis') || code.toLowerCase().startsWith('ax');
           
           let correctBrand = item.brand || 'RE';
-          if (isAxxis) correctBrand = 'AXXIS'; // Force it to Axxis tab
+          if (isAxxis) correctBrand = 'AXXIS'; 
 
           return {
             ...item,
@@ -59,7 +58,8 @@ export default function DeonStockApp() {
         });
 
         setItems(patchedData);
-        setDebugMsg('');
+        setDebugMsg('Database Synced');
+        setTimeout(() => setDebugMsg(''), 2000);
       } else {
         setDebugMsg('Failed to load.');
       }
@@ -71,7 +71,7 @@ export default function DeonStockApp() {
 
   const saveToCloud = async (newItems: DisplayItem[]) => {
       setIsSaving(true);
-      setDebugMsg('Saving...');
+      setDebugMsg('Saving to Cloud...');
       try {
           await fetch('/api/stock', {
               method: 'POST',
@@ -215,7 +215,6 @@ export default function DeonStockApp() {
         });
       });
 
-      // --- ASYNC FIX: Update state functionally to prevent stale data overwrites ---
       setItems(prevItems => {
           let mergedItems = [...prevItems];
           
@@ -233,7 +232,6 @@ export default function DeonStockApp() {
               }
           });
 
-          // Schedule save immediately after state updates
           setTimeout(() => saveToCloud(mergedItems), 0);
           return mergedItems;
       });
@@ -421,7 +419,6 @@ export default function DeonStockApp() {
       }
   };
 
-  // --- ASYNC FIX: Update state functionally for image uploads ---
   const handleImageUpload = (id: number, e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
@@ -459,7 +456,6 @@ export default function DeonStockApp() {
       }
   };
 
-  // --- ASYNC FIX: Update state functionally for manual stock edits ---
   const handleStockChange = (id: number, val: string) => {
     const newStock = parseFloat(val);
     const finalStock = isNaN(newStock) ? 0 : newStock;
@@ -473,7 +469,6 @@ export default function DeonStockApp() {
     });
   };
 
-  // --- ASYNC FIX: Update state functionally for manual size edits ---
   const handleSizeChange = (id: number, val: string) => {
     const finalSize = val.trim().toUpperCase();
 
@@ -503,7 +498,15 @@ export default function DeonStockApp() {
                 <h1 className="text-3xl md:text-4xl font-extrabold text-blue-600 italic uppercase tracking-tighter">
                   DEON {activeBrand} <span className="text-gray-300">/</span> STOCK
                 </h1>
-                <p className="text-xs text-gray-500 font-mono mt-1">CLOUD SYNC ACTIVE</p>
+                <div className="flex items-center gap-3 mt-1">
+                  <p className="text-xs text-gray-500 font-mono">CLOUD SYNC ACTIVE</p>
+                  {/* NEW VISUAL INDICATOR FOR SAVING STATUS */}
+                  {debugMsg && (
+                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${isSaving || debugMsg.includes('Processing') ? 'bg-yellow-100 text-yellow-700 animate-pulse' : 'bg-green-100 text-green-700'}`}>
+                      {debugMsg}
+                    </span>
+                  )}
+                </div>
              </div>
 
              <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200 shadow-sm">
@@ -532,6 +535,16 @@ export default function DeonStockApp() {
                 <Upload size={18} /> <span className="font-bold text-sm">Update</span>
                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".xlsx" />
               </label>
+
+              {/* NEW REFRESH BUTTON ADDED HERE */}
+              <button 
+                onClick={fetchItems} 
+                className="flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-2 rounded shadow hover:bg-blue-200 h-10 transition-all active:scale-95"
+                title="Fetch latest data from Cloud"
+              >
+                <RefreshCw size={18} className={debugMsg === 'Loading Database...' ? 'animate-spin' : ''} /> 
+                <span className="font-bold text-sm">Refresh</span>
+              </button>
 
               <label className={`flex items-center gap-2 px-4 py-2 rounded shadow h-10 cursor-pointer ${bannerImage ? 'bg-purple-600 text-white' : 'bg-gray-200 text-gray-700'}`}>
                 <ImagePlus size={18} /> <span className="font-bold text-sm">{bannerImage ? 'Banner' : 'Banner'}</span>
