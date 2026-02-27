@@ -87,9 +87,14 @@ export default function DeonStockApp() {
       }
   };
 
-  // --- DEDICATED MANUAL SAVE HANDLER ---
+  // --- FIX: Stale State on Save ---
+  // Using the setItems callback ensures we grab the absolute newest data
+  // even if the user clicked "Save" immediately after typing.
   const handleManualSave = () => {
-      saveToCloud(items);
+      setItems(prevItems => {
+          saveToCloud(prevItems);
+          return prevItems; // Return it untouched so the UI doesn't flicker
+      });
   };
 
   const getSafeValue = (cell: ExcelJS.Cell): string => {
@@ -236,7 +241,6 @@ export default function DeonStockApp() {
               }
           });
 
-          // Excel uploads are massive, so we still auto-save this one specific action
           setTimeout(() => saveToCloud(mergedItems), 0);
           return mergedItems;
       });
@@ -424,8 +428,8 @@ export default function DeonStockApp() {
       }
   };
 
-  // --- COMPRESSION ADDED HERE ---
-  const handleImageUpload = (id: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- FIX: Using 'code' instead of 'id' to prevent Excel overwrites ---
+  const handleImageUpload = (code: string, e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
           const reader = new FileReader();
@@ -446,7 +450,7 @@ export default function DeonStockApp() {
 
                   setItems(prevItems => {
                       return prevItems.map(item => 
-                        item.id === id ? { ...item, image: compressedBase64 } : item
+                        item.code === code ? { ...item, image: compressedBase64 } : item
                       );
                   });
               };
@@ -468,31 +472,33 @@ export default function DeonStockApp() {
 
   const handleClearData = async () => {
       if(confirm(`Clear ALL data for ${activeBrand} from cloud database?`)) {
-          const remainingItems = items.filter(i => (i.brand || 'RE') !== activeBrand);
-          setItems(remainingItems);
-          saveToCloud(remainingItems); 
+          setItems(prevItems => {
+              const remainingItems = prevItems.filter(i => (i.brand || 'RE') !== activeBrand);
+              saveToCloud(remainingItems); 
+              return remainingItems;
+          });
       }
   };
 
-  const handleStockChange = (id: number, val: string) => {
+  // --- FIX: Using 'code' instead of 'id' ---
+  const handleStockChange = (code: string, val: string) => {
     const newStock = parseFloat(val);
     const finalStock = isNaN(newStock) ? 0 : newStock;
 
     setItems(prevItems => {
-      // ONLY update local state, no auto-save
       return prevItems.map(item => 
-        item.id === id ? { ...item, stock: finalStock } : item
+        item.code === code ? { ...item, stock: finalStock } : item
       );
     });
   };
 
-  const handleSizeChange = (id: number, val: string) => {
+  // --- FIX: Using 'code' instead of 'id' ---
+  const handleSizeChange = (code: string, val: string) => {
     const finalSize = val.trim().toUpperCase();
 
     setItems(prevItems => {
-      // ONLY update local state, no auto-save
       return prevItems.map(item => 
-        item.id === id ? { ...item, size: finalSize } : item
+        item.code === code ? { ...item, size: finalSize } : item
       );
     });
   };
@@ -547,7 +553,6 @@ export default function DeonStockApp() {
           <div className="mt-6 flex flex-col md:flex-row gap-4 items-center">
             <div className="flex gap-2">
               
-              {/* DEDICATED SAVE BUTTON */}
               <button 
                 onClick={handleManualSave}
                 disabled={isSaving}
@@ -614,7 +619,7 @@ export default function DeonStockApp() {
             </thead>
             <tbody>
               {filtered.length > 0 ? filtered.map((item, index) => (
-                <tr key={item.id} className="border-b border-black text-center h-24 hover:bg-gray-50 transition-colors">
+                <tr key={`${item.code}-${index}`} className="border-b border-black text-center h-24 hover:bg-gray-50 transition-colors">
                   <td className="p-2 border-r border-black font-bold">{index + 1}</td>
                   <td className="p-2 border-r border-black font-bold text-lg">
                     {item.code} <br/> <span className="text-gray-600 text-base font-normal">{item.mrp ? `(${item.mrp})` : ''}</span>
@@ -622,7 +627,8 @@ export default function DeonStockApp() {
                   <td className="p-2 border-r border-black relative group">
                     <div className="flex justify-center items-center h-20 w-20 mx-auto cursor-pointer relative overflow-hidden rounded">
                         <label className="w-full h-full flex items-center justify-center cursor-pointer">
-                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(item.id, e)} />
+                            {/* FIX: Passing item.code instead of item.id */}
+                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(item.code, e)} />
                             {item.image ? (
                                <img src={item.image} alt="Pic" className="max-h-20 max-w-20 object-contain" />
                             ) : (
@@ -642,7 +648,8 @@ export default function DeonStockApp() {
                     <input 
                         type="text" 
                         defaultValue={item.size}
-                        onBlur={(e) => handleSizeChange(item.id, e.target.value)}
+                        /* FIX: Passing item.code instead of item.id */
+                        onBlur={(e) => handleSizeChange(item.code, e.target.value)}
                         className="w-full h-full min-h-[96px] text-center font-bold text-lg focus:bg-gray-50 outline-none p-2 bg-transparent uppercase" 
                     />
                   </td>
@@ -651,7 +658,8 @@ export default function DeonStockApp() {
                     <input 
                         type="number" 
                         defaultValue={item.stock}
-                        onBlur={(e) => handleStockChange(item.id, e.target.value)}
+                        /* FIX: Passing item.code instead of item.id */
+                        onBlur={(e) => handleStockChange(item.code, e.target.value)}
                         className="w-full h-full min-h-[96px] text-center font-extrabold text-xl focus:bg-gray-50 outline-none p-2 bg-transparent" 
                     />
                   </td>
