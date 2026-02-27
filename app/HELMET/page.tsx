@@ -38,7 +38,6 @@ export default function DeonStockApp() {
   const fetchItems = async () => {
     setDebugMsg('Loading Database...');
     try {
-      // Force fetching fresh data by adding a timestamp cache-buster
       const res = await fetch(`/api/stock?t=${new Date().getTime()}`);
       if (res.ok) {
         const data = await res.json();
@@ -78,14 +77,19 @@ export default function DeonStockApp() {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(newItems)
           });
-          setDebugMsg('Saved!');
-          setTimeout(() => setDebugMsg(''), 2000);
+          setDebugMsg('Saved Successfully!');
+          setTimeout(() => setDebugMsg(''), 3000);
       } catch (err) {
           console.error(err);
           setDebugMsg('Save Failed!');
       } finally {
           setIsSaving(false);
       }
+  };
+
+  // --- DEDICATED MANUAL SAVE HANDLER ---
+  const handleManualSave = () => {
+      saveToCloud(items);
   };
 
   const getSafeValue = (cell: ExcelJS.Cell): string => {
@@ -232,6 +236,7 @@ export default function DeonStockApp() {
               }
           });
 
+          // Excel uploads are massive, so we still auto-save this one specific action
           setTimeout(() => saveToCloud(mergedItems), 0);
           return mergedItems;
       });
@@ -427,11 +432,10 @@ export default function DeonStockApp() {
               const newImg = ev.target?.result as string;
               
               setItems(prevItems => {
-                  const newItems = prevItems.map(item => 
+                  // ONLY update local state, no auto-save
+                  return prevItems.map(item => 
                     item.id === id ? { ...item, image: newImg } : item
                   );
-                  setTimeout(() => saveToCloud(newItems), 0);
-                  return newItems;
               });
           };
           reader.readAsDataURL(file);
@@ -461,11 +465,10 @@ export default function DeonStockApp() {
     const finalStock = isNaN(newStock) ? 0 : newStock;
 
     setItems(prevItems => {
-      const updatedItems = prevItems.map(item => 
+      // ONLY update local state, no auto-save
+      return prevItems.map(item => 
         item.id === id ? { ...item, stock: finalStock } : item
       );
-      setTimeout(() => saveToCloud(updatedItems), 0);
-      return updatedItems;
     });
   };
 
@@ -473,11 +476,10 @@ export default function DeonStockApp() {
     const finalSize = val.trim().toUpperCase();
 
     setItems(prevItems => {
-      const updatedItems = prevItems.map(item => 
+      // ONLY update local state, no auto-save
+      return prevItems.map(item => 
         item.id === id ? { ...item, size: finalSize } : item
       );
-      setTimeout(() => saveToCloud(updatedItems), 0);
-      return updatedItems;
     });
   };
 
@@ -500,7 +502,6 @@ export default function DeonStockApp() {
                 </h1>
                 <div className="flex items-center gap-3 mt-1">
                   <p className="text-xs text-gray-500 font-mono">CLOUD SYNC ACTIVE</p>
-                  {/* NEW VISUAL INDICATOR FOR SAVING STATUS */}
                   {debugMsg && (
                     <span className={`text-xs font-bold px-3 py-1 rounded-full ${isSaving || debugMsg.includes('Processing') ? 'bg-yellow-100 text-yellow-700 animate-pulse' : 'bg-green-100 text-green-700'}`}>
                       {debugMsg}
@@ -531,12 +532,22 @@ export default function DeonStockApp() {
           
           <div className="mt-6 flex flex-col md:flex-row gap-4 items-center">
             <div className="flex gap-2">
+              
+              {/* DEDICATED SAVE BUTTON */}
+              <button 
+                onClick={handleManualSave}
+                disabled={isSaving}
+                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 h-10 transition-all active:scale-95 disabled:opacity-50"
+              >
+                <Save size={18} className={isSaving ? 'animate-bounce' : ''} /> 
+                <span className="font-bold text-sm">{isSaving ? 'Saving...' : 'Save Changes'}</span>
+              </button>
+
               <label className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 cursor-pointer h-10 transition-active active:scale-95">
                 <Upload size={18} /> <span className="font-bold text-sm">Update</span>
                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".xlsx" />
               </label>
 
-              {/* NEW REFRESH BUTTON ADDED HERE */}
               <button 
                 onClick={fetchItems} 
                 className="flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-2 rounded shadow hover:bg-blue-200 h-10 transition-all active:scale-95"
