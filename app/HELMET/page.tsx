@@ -424,19 +424,33 @@ export default function DeonStockApp() {
       }
   };
 
+  // --- COMPRESSION ADDED HERE ---
   const handleImageUpload = (id: number, e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
           const reader = new FileReader();
           reader.onload = (ev) => {
-              const newImg = ev.target?.result as string;
-              
-              setItems(prevItems => {
-                  // ONLY update local state, no auto-save
-                  return prevItems.map(item => 
-                    item.id === id ? { ...item, image: newImg } : item
-                  );
-              });
+              const img = new Image();
+              img.onload = () => {
+                  const canvas = document.createElement('canvas');
+                  const MAX_WIDTH = 300; 
+                  const scaleSize = MAX_WIDTH / img.width;
+                  
+                  canvas.width = MAX_WIDTH;
+                  canvas.height = img.height * scaleSize;
+
+                  const ctx = canvas.getContext('2d');
+                  ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                  const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+
+                  setItems(prevItems => {
+                      return prevItems.map(item => 
+                        item.id === id ? { ...item, image: compressedBase64 } : item
+                      );
+                  });
+              };
+              img.src = ev.target?.result as string;
           };
           reader.readAsDataURL(file);
       }
