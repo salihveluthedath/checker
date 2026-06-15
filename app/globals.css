@@ -1,5 +1,35 @@
 @import "tailwindcss";
 
+/* ── Local fonts: Asket family ── */
+@font-face {
+  font-family: 'Asket Condensed';
+  src: url('/fonts/Asket Condensed Extrabold.woff') format('woff');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Asket Extended';
+  src: url('/fonts/Asket Extended Light.woff') format('woff');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Asket';
+  src: url('/fonts/Asket Extrabold.woff') format('woff');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Asket Narrow';
+  src: url('/fonts/Asket Narrow Light.woff') format('woff');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

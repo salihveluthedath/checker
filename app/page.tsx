@@ -12,12 +12,15 @@ export default function HomePage() {
         href="/HELMET" 
         className="px-8 py-4 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 transition-transform active:scale-95"
       >
-        Open Helmet Stock Dashboard
+        🪖 Helmet Stock Dashboard
       </Link>
-      
-      {/* If you build other pages later, link them like this: */}
-      {/* <Link href="/tank-bags">Tank Bags</Link> */}
-      {/* <Link href="/crash-guards">Crash Guards</Link> */}
+
+      <Link 
+        href="/poster" 
+        className="px-8 py-4 bg-indigo-700 text-white font-bold rounded-xl shadow-lg hover:bg-indigo-800 transition-transform active:scale-95"
+      >
+        📸 Instagram Poster Generator
+      </Link>
     </div>
   );
 }
