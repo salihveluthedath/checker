@@ -711,6 +711,16 @@ export default function DeonStockApp() {
     });
   };
 
+  const handleDeleteItem = (id: number) => {
+    if (confirm('Are you sure you want to delete this item?')) {
+      setItems(prevItems => {
+        const updatedItems = prevItems.filter(item => item.id !== id);
+        setTimeout(() => saveToCloud(updatedItems), 0);
+        return updatedItems;
+      });
+    }
+  };
+
   const filtered = items.filter(i => {
     const itemBrand = i.brand || 'RE'; 
     return itemBrand === activeBrand && (
@@ -1013,7 +1023,8 @@ export default function DeonStockApp() {
         }
         .stock-table thead th:nth-child(2),
         .stock-table thead th:nth-child(3),
-        .stock-table thead th:nth-child(4) {
+        .stock-table thead th:nth-child(4),
+        .stock-table thead th:nth-child(6) {
           background: #121212;
         }
         .stock-table thead th:nth-child(2) {
@@ -1361,6 +1372,7 @@ export default function DeonStockApp() {
                 <th style={{ width: 130 }}>PICTURE</th>
                 <th style={{ width: 80 }}>SIZE</th>
                 <th style={{ width: 80 }}>STOCK</th>
+                <th style={{ width: 60 }}>ACTION</th>
               </tr>
             </thead>
             <tbody>
@@ -1375,9 +1387,6 @@ export default function DeonStockApp() {
                   </td>
                   <td className="item-cell">
                     <div className="item-code">{item.code}</div>
-                    {activeBrand !== 'RE' && item.originalDesc && (
-                      <div className="item-desc">{item.originalDesc}</div>
-                    )}
                     {item.mrp && (
                       <div className="item-mrp">(₹{item.mrp})</div>
                     )}
@@ -1415,10 +1424,21 @@ export default function DeonStockApp() {
                       onBlur={(e) => handleStockChange(item.id, e.target.value)}
                     />
                   </td>
+                  <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                    <button 
+                      onClick={() => handleDeleteItem(item.id)}
+                      style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '8px', opacity: 0.7, transition: 'opacity 0.2s' }}
+                      onMouseOver={(e) => e.currentTarget.style.opacity = '1'}
+                      onMouseOut={(e) => e.currentTarget.style.opacity = '0.7'}
+                      title="Delete Item"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={6}>
                     <div className="empty-state">
                       <FileQuestion size={48} />
                       <p>

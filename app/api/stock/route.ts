@@ -10,13 +10,36 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  await dbConnect();
-  const body = await req.json();
+  await dbConnect();
+  const body = await req.json();
 
-  // Simple Sync: Delete old data and replace with new (easiest for stock lists)
-  // Ideally, we would upsert, but for your specific excel usage, this ensures exact match.
-  await StockItem.deleteMany({});
-  await StockItem.insertMany(body);
+  if (!Array.isArray(body)) {
+    return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+  }
 
-  return NextResponse.json({ success: true });
+  if (body.length === 0) {
+    await StockItem.deleteMany({});
+    return NextResponse.json({ success: true });
+  }
+
+  const bulkOps = body.map((item: any) => {
+    // Remove MongoDB internal fields to prevent duplicate key errors
+    const { _id, __v, ...rest } = item;
+    return {
+      replaceOne: {
+        filter: { id: item.id },
+        replacement: rest,
+        upsert: true
+      }
+    };
+  });
+
+  // Safely perform upserts without dropping the collection first
+  await StockItem.bulkWrite(bulkOps);
+
+  // Remove any items that are no longer in the payload
+  const incomingIds = body.map((item: any) => item.id);
+  await StockItem.deleteMany({ id: { $nin: incomingIds } });
+
+  return NextResponse.json({ success: true });
 }

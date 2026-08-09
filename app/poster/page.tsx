@@ -577,22 +577,7 @@ export default function PosterGeneratorPage() {
                   </div>
 
                   <div className="f">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '4px' }}>
-                      <label style={{ marginBottom: 0 }}>Product Image</label>
-                      {data.productImage && (
-                        <button
-                          onClick={() => update('productImage', null)}
-                          title="Remove image"
-                          style={{
-                            background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.2)', borderRadius: '4px',
-                            color: '#f87171', cursor: 'pointer', fontSize: '.55rem', padding: '2px 6px',
-                            display: 'flex', alignItems: 'center', gap: '3px', transition: 'all .2s'
-                          }}
-                        >
-                          <Trash2 size={10} /> Remove
-                        </button>
-                      )}
-                    </div>
+                    <label>Product Image</label>
                     <label className="iu" style={{ cursor: 'pointer' }}>
                       <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
                       {data.productImage
