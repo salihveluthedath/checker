@@ -68,30 +68,43 @@ export default function DeonStockApp() {
   const fetchItems = async () => {
     setDebugMsg('Loading Database...');
     try {
-      const res = await fetch('/api/stock');
-      if (res.ok) {
-        const data = await res.json();
-        
-        // --- BULLETPROOF OVERRIDE ADDED HERE ---
-        const patchedData = data.map((item: DisplayItem) => {
-          const desc = item.originalDesc || '';
-          const code = item.code || '';
-          const isAxxis = desc.toLowerCase().includes('axxis') || code.toLowerCase().startsWith('ax');
-          
-          let correctBrand = item.brand || 'RE';
-          if (isAxxis) correctBrand = 'AXXIS';
+      let allData: DisplayItem[] = [];
+      let page = 1;
+      let hasMore = true;
 
-          return {
-            ...item,
-            brand: correctBrand
-          };
-        });
-
-        setItems(patchedData);
-        setDebugMsg('');
-      } else {
-        setDebugMsg('Failed to load.');
+      while (hasMore) {
+        const res = await fetch(`/api/stock?page=${page}&limit=50`);
+        if (res.ok) {
+          const data = await res.json();
+          allData = [...allData, ...data.items];
+          if (page >= data.totalPages || data.items.length === 0) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        } else {
+          setDebugMsg('Failed to load.');
+          return;
+        }
       }
+      
+      // --- BULLETPROOF OVERRIDE ADDED HERE ---
+      const patchedData = allData.map((item: DisplayItem) => {
+        const desc = item.originalDesc || '';
+        const code = item.code || '';
+        const isAxxis = desc.toLowerCase().includes('axxis') || code.toLowerCase().startsWith('ax');
+        
+        let correctBrand = item.brand || 'RE';
+        if (isAxxis) correctBrand = 'AXXIS';
+
+        return {
+          ...item,
+          brand: correctBrand
+        };
+      });
+
+      setItems(patchedData);
+      setDebugMsg('');
     } catch (error) {
       console.error(error);
       setDebugMsg('Connection Error.');
@@ -102,16 +115,39 @@ export default function DeonStockApp() {
       setIsSaving(true);
       setDebugMsg('Saving...');
       try {
-          await fetch('/api/stock', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(newItems)
-          });
+          // Send items in chunks of 50 to avoid Vercel 4.5MB limits
+          const chunkSize = 50;
+          for (let i = 0; i < newItems.length; i += chunkSize) {
+              const chunk = newItems.slice(i, i + chunkSize);
+              const res = await fetch('/api/stock', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(chunk)
+              });
+              if (!res.ok) {
+                  throw new Error(`Failed to save chunk ${i / chunkSize + 1}`);
+              }
+          }
           setDebugMsg('Saved!');
           setTimeout(() => setDebugMsg(''), 2000);
       } catch (err) {
           console.error(err);
           setDebugMsg('Save Failed!');
+      } finally {
+          setIsSaving(false);
+      }
+  };
+
+  const saveSingleItemToCloud = async (item: DisplayItem) => {
+      setIsSaving(true);
+      try {
+          await fetch('/api/stock', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify([item])
+          });
+      } catch (err) {
+          console.error(err);
       } finally {
           setIsSaving(false);
       }
@@ -660,7 +696,8 @@ export default function DeonStockApp() {
                   const newItems = prevItems.map(item => 
                     item.id === id ? { ...item, image: newImg } : item
                   );
-                  setTimeout(() => saveToCloud(newItems), 0);
+                  const changedItem = newItems.find(i => i.id === id);
+                  if (changedItem) setTimeout(() => saveSingleItemToCloud(changedItem), 0);
                   return newItems;
               });
           };
@@ -682,7 +719,7 @@ export default function DeonStockApp() {
       if(confirm(`Clear ALL data for ${activeBrand} from cloud database?`)) {
           const remainingItems = items.filter(i => (i.brand || 'RE') !== activeBrand);
           setItems(remainingItems);
-          saveToCloud(remainingItems); 
+          await fetch(`/api/stock?brand=${activeBrand}`, { method: 'DELETE' });
       }
   };
 
@@ -694,7 +731,8 @@ export default function DeonStockApp() {
       const updatedItems = prevItems.map(item => 
         item.id === id ? { ...item, stock: finalStock } : item
       );
-      setTimeout(() => saveToCloud(updatedItems), 0);
+      const changedItem = updatedItems.find(i => i.id === id);
+      if (changedItem) setTimeout(() => saveSingleItemToCloud(changedItem), 0);
       return updatedItems;
     });
   };
@@ -706,18 +744,16 @@ export default function DeonStockApp() {
       const updatedItems = prevItems.map(item => 
         item.id === id ? { ...item, size: finalSize } : item
       );
-      setTimeout(() => saveToCloud(updatedItems), 0);
+      const changedItem = updatedItems.find(i => i.id === id);
+      if (changedItem) setTimeout(() => saveSingleItemToCloud(changedItem), 0);
       return updatedItems;
     });
   };
 
-  const handleDeleteItem = (id: number) => {
+  const handleDeleteItem = async (id: number) => {
     if (confirm('Are you sure you want to delete this item?')) {
-      setItems(prevItems => {
-        const updatedItems = prevItems.filter(item => item.id !== id);
-        setTimeout(() => saveToCloud(updatedItems), 0);
-        return updatedItems;
-      });
+      setItems(prevItems => prevItems.filter(item => item.id !== id));
+      await fetch(`/api/stock?id=${id}`, { method: 'DELETE' });
     }
   };
 

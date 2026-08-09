@@ -2,11 +2,23 @@ import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/db';
 import StockItem from '@/models/StockItem';
 
-export async function GET() {
-  await dbConnect();
-  // Fetch all items
-  const items = await StockItem.find({}).sort({ id: 1 });
-  return NextResponse.json(items);
+export async function GET(req: Request) {
+  await dbConnect();
+  
+  const url = new URL(req.url);
+  const page = parseInt(url.searchParams.get('page') || '1');
+  const limit = parseInt(url.searchParams.get('limit') || '50');
+
+  const skip = (page - 1) * limit;
+  const items = await StockItem.find({}).sort({ id: 1 }).skip(skip).limit(limit);
+  const total = await StockItem.countDocuments({});
+
+  return NextResponse.json({
+    items,
+    total,
+    page,
+    totalPages: Math.ceil(total / limit)
+  });
 }
 
 export async function POST(req: Request) {
@@ -18,7 +30,6 @@ export async function POST(req: Request) {
   }
 
   if (body.length === 0) {
-    await StockItem.deleteMany({});
     return NextResponse.json({ success: true });
   }
 
@@ -37,9 +48,23 @@ export async function POST(req: Request) {
   // Safely perform upserts without dropping the collection first
   await StockItem.bulkWrite(bulkOps);
 
-  // Remove any items that are no longer in the payload
-  const incomingIds = body.map((item: any) => item.id);
-  await StockItem.deleteMany({ id: { $nin: incomingIds } });
+  return NextResponse.json({ success: true });
+}
+
+export async function DELETE(req: Request) {
+  await dbConnect();
+  
+  const url = new URL(req.url);
+  const id = url.searchParams.get('id');
+  const brand = url.searchParams.get('brand');
+
+  if (id) {
+    await StockItem.deleteOne({ id: parseInt(id) });
+  } else if (brand) {
+    await StockItem.deleteMany({ brand });
+  } else {
+    await StockItem.deleteMany({});
+  }
 
   return NextResponse.json({ success: true });
 }
