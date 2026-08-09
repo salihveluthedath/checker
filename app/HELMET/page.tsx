@@ -229,7 +229,13 @@ export default function DeonStockApp() {
             size = sizeMatch ? sizeMatch[1].toUpperCase() : '-';
         }
 
-        const detectedBrand = activeBrand;
+        const descToCheck = (rawDesc || code || '').toLowerCase();
+        let detectedBrand = activeBrand; // default to active tab
+        if (descToCheck.includes('axxis') || descToCheck.startsWith('ax')) {
+             detectedBrand = 'AXXIS';
+        } else if (descToCheck.includes('re ') || descToCheck.includes('royal enfield') || descToCheck.startsWith('re')) {
+             detectedBrand = 'RE';
+        }
 
         newItems.push({
           id: rowNumber, 
