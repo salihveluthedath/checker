@@ -13,6 +13,8 @@ interface DisplayItem {
   size: string;
   stock: number;
   image: string;
+  imageSide?: string;
+  imageRear?: string;
   originalDesc: string;
   originalPartNo: string;
   brand?: 'RE' | 'AXXIS'; 
@@ -685,7 +687,7 @@ export default function DeonStockApp() {
     doc.save(`Deon_${activeBrand}_Stock.pdf`);
   };
 
-  const handleImageUpload = (id: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (id: number, type: 'front'|'side'|'rear', e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
           const reader = new FileReader();
@@ -693,9 +695,14 @@ export default function DeonStockApp() {
               const newImg = ev.target?.result as string;
               
               setItems(prevItems => {
-                  const newItems = prevItems.map(item => 
-                    item.id === id ? { ...item, image: newImg } : item
-                  );
+                  const newItems = prevItems.map(item => {
+                    if (item.id === id) {
+                      if (type === 'front') return { ...item, image: newImg };
+                      if (type === 'side') return { ...item, imageSide: newImg };
+                      if (type === 'rear') return { ...item, imageRear: newImg };
+                    }
+                    return item;
+                  });
                   const changedItem = newItems.find(i => i.id === id);
                   if (changedItem) setTimeout(() => saveSingleItemToCloud(changedItem), 0);
                   return newItems;
@@ -703,6 +710,139 @@ export default function DeonStockApp() {
           };
           reader.readAsDataURL(file);
       }
+  };
+
+  const handleExportCatalogPDF = () => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const exportItems = items.filter(item => (item.brand || 'RE') === activeBrand && item.stock > 0);
+
+    if (exportItems.length === 0) { alert(`No ${activeBrand} items to export!`); return; }
+
+    const isRE = activeBrand === 'RE';
+    const primaryColor = isRE ? [198, 32, 32] : [12, 50, 140];
+    
+    let y = 10;
+    const activeTopHead = isRE ? reTopHeadImage : topHeadImage;
+
+    if (activeTopHead) {
+      const imgHeight = pageWidth * (500 / 1080);
+      doc.addImage(activeTopHead, 'PNG', 0, 0, pageWidth, imgHeight);
+      y = imgHeight + 5;
+    } else {
+      doc.setTextColor(30, 100, 200); 
+      doc.setFontSize(22);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`DEON ${activeBrand} CATALOG`, 14, 20);
+      y = 30;
+    }
+
+    const margin = 10;
+    const cardWidth = pageWidth - margin * 2;
+    const cardHeight = 70;
+    const itemSpacing = 5;
+
+    exportItems.forEach((item, index) => {
+        if (y + cardHeight > pageHeight - 15) {
+            doc.addPage();
+            y = 10;
+        }
+
+        // Card Container
+        doc.setDrawColor(220, 220, 220);
+        doc.setFillColor(250, 250, 250);
+        doc.roundedRect(margin, y, cardWidth, cardHeight, 3, 3, 'FD');
+
+        // Header bars
+        // Left side: Item Code (Red/Blue bg)
+        doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        doc.roundedRect(margin, y, 75, 10, 3, 3, 'F');
+        // Mask the right side of the left header to make it flat
+        doc.rect(margin + 70, y, 5, 10, 'F');
+        
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.text('ITEM CODE', margin + 5, y + 6.5);
+        doc.setFontSize(10);
+        doc.text(item.code || '-', margin + 25, y + 6.5);
+
+        // MRP (Grey bg)
+        doc.setFillColor(230, 230, 230);
+        doc.rect(margin + 75, y, 40, 10, 'F');
+        doc.setTextColor(50, 50, 50);
+        doc.setFontSize(8);
+        doc.text('MRP', margin + 80, y + 6.5);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Rs. ${item.mrp || '-'}`, margin + 92, y + 6.5);
+
+        // Right side: Size and Stock
+        // Size part (Black bg)
+        doc.setFillColor(30, 30, 30);
+        doc.roundedRect(margin + cardWidth - 60, y, 35, 10, 3, 3, 'F');
+        doc.rect(margin + cardWidth - 30, y, 5, 10, 'F'); // Mask right corner
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(8);
+        doc.text('SIZE', margin + cardWidth - 55, y + 6.5);
+        doc.setFontSize(12);
+        doc.text(item.size || '-', margin + cardWidth - 40, y + 6.5);
+
+        // Stock part (Red/Blue bg)
+        doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        doc.roundedRect(margin + cardWidth - 25, y, 25, 10, 3, 3, 'F');
+        doc.rect(margin + cardWidth - 25, y, 5, 10, 'F'); // Mask left corner
+        doc.setTextColor(255, 255, 255);
+        doc.setFontSize(8);
+        doc.text('STOCK', margin + cardWidth - 20, y + 6.5);
+        doc.setFontSize(14);
+        doc.text(String(item.stock), margin + cardWidth - 5, y + 6.5);
+
+        // Images Section
+        const imgBoxWidth = (cardWidth - 20) / 3;
+        const imgBoxHeight = 50;
+        const imgY = y + 15;
+        
+        const drawImageBox = (xOffset: number, title: string, imgData?: string) => {
+            const x = margin + 5 + xOffset;
+            doc.setFillColor(242, 242, 242);
+            doc.roundedRect(x, imgY, imgBoxWidth, imgBoxHeight, 2, 2, 'F');
+            
+            if (imgData) {
+                try {
+                    const iSize = 40;
+                    doc.addImage(imgData, 'JPEG', x + (imgBoxWidth-iSize)/2, imgY + 2, iSize, iSize);
+                } catch(e) {}
+            }
+
+            doc.setTextColor(100, 100, 100);
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'bold');
+            doc.text(title, x + imgBoxWidth/2, imgY + imgBoxHeight - 3, { align: 'center' });
+        };
+
+        drawImageBox(0, 'FRONT', item.image);
+        drawImageBox(imgBoxWidth + 5, 'SIDE', item.imageSide);
+        drawImageBox((imgBoxWidth + 5) * 2, 'REAR', item.imageRear);
+
+        y += cardHeight + itemSpacing;
+    });
+
+    if (bottomHeadImage) {
+        if (y + 30 < pageHeight) {
+            doc.addImage(bottomHeadImage, 'PNG', margin, y + 5, cardWidth, 20);
+        } else {
+            doc.addPage();
+            if (activeTopHead) {
+                const imgHeight = pageWidth * (500 / 1080);
+                doc.addImage(activeTopHead, 'PNG', 0, 0, pageWidth, imgHeight);
+            }
+            doc.addImage(bottomHeadImage, 'PNG', margin, 55, cardWidth, 20);
+        }
+    }
+
+    doc.save(`Deon_${activeBrand}_Catalog.pdf`);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1363,7 +1503,10 @@ export default function DeonStockApp() {
                 <Download size={16} /> Excel
               </button>
               <button onClick={handleExportPDF} className="tool-btn tool-btn-red">
-                <FileText size={16} /> PDF
+                <FileText size={16} /> Table PDF
+              </button>
+              <button onClick={handleExportCatalogPDF} className="tool-btn tool-btn-red">
+                <FileText size={16} /> Catalog PDF
               </button>
               <button onClick={handleClearData} className="tool-btn tool-btn-ghost">
                 <Trash2 size={15} />
@@ -1405,7 +1548,7 @@ export default function DeonStockApp() {
               <tr>
                 <th style={{ width: 48 }}>NO</th>
                 <th>{activeBrand === 'RE' ? 'ITEM CODE / MRP' : 'ITEM CODE / MODEL'}</th>
-                <th style={{ width: 130 }}>PICTURE</th>
+                <th style={{ width: 180 }}>PICTURES (Front/Side/Rear)</th>
                 <th style={{ width: 80 }}>SIZE</th>
                 <th style={{ width: 80 }}>STOCK</th>
                 <th style={{ width: 60 }}>ACTION</th>
@@ -1429,20 +1572,41 @@ export default function DeonStockApp() {
                     <div className="item-underline"></div>
                   </td>
                   <td className="pic-cell">
-                    <label className="pic-wrap">
-                      <input type="file" style={{ display: 'none' }} accept="image/*" onChange={(e) => handleImageUpload(item.id, e)} />
-                      {item.image ? (
-                        <>
-                          <img src={item.image} alt={item.code} />
-                          <div className="pic-overlay"><Camera size={20} /></div>
-                        </>
-                      ) : (
-                        <div className="pic-placeholder">
-                          <ImageIcon size={28} />
-                          <span>Add</span>
-                        </div>
-                      )}
-                    </label>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <label className="pic-wrap">
+                        <input type="file" style={{ display: 'none' }} accept="image/*" onChange={(e) => handleImageUpload(item.id, 'front', e)} />
+                        {item.image ? (
+                          <>
+                            <img src={item.image} alt={item.code} />
+                            <div className="pic-overlay"><Camera size={14} /></div>
+                          </>
+                        ) : (
+                          <div className="pic-placeholder" style={{ fontSize: '10px' }}><span>Front</span></div>
+                        )}
+                      </label>
+                      <label className="pic-wrap">
+                        <input type="file" style={{ display: 'none' }} accept="image/*" onChange={(e) => handleImageUpload(item.id, 'side', e)} />
+                        {item.imageSide ? (
+                          <>
+                            <img src={item.imageSide} alt={item.code} />
+                            <div className="pic-overlay"><Camera size={14} /></div>
+                          </>
+                        ) : (
+                          <div className="pic-placeholder" style={{ fontSize: '10px' }}><span>Side</span></div>
+                        )}
+                      </label>
+                      <label className="pic-wrap">
+                        <input type="file" style={{ display: 'none' }} accept="image/*" onChange={(e) => handleImageUpload(item.id, 'rear', e)} />
+                        {item.imageRear ? (
+                          <>
+                            <img src={item.imageRear} alt={item.code} />
+                            <div className="pic-overlay"><Camera size={14} /></div>
+                          </>
+                        ) : (
+                          <div className="pic-placeholder" style={{ fontSize: '10px' }}><span>Rear</span></div>
+                        )}
+                      </label>
+                    </div>
                   </td>
                   <td className="size-cell">
                     <input 

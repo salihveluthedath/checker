@@ -7,6 +7,8 @@ const StockItemSchema = new mongoose.Schema({
   size: String,
   stock: Number,
   image: String, 
+  imageSide: String,
+  imageRear: String,
   originalDesc: String,
   originalPartNo: String,
   // ADD THIS FIELD
